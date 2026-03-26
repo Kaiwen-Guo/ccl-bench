@@ -1,102 +1,92 @@
 """
 Metric: average_memory_bandwidth
-Description: Average memory bandwidth achieved during memory copy operations. Lower values
-             compared to hardware peak indicate inefficient memory access patterns or small
-             transfer sizes.
+Description: Average memory bandwidth achieved during memory copy operations.
+             Supported for NSYS traces with CUPTI memcpy data.
 Unit: GB/s (Gigabytes per second)
 Returns: Float (GB/s), or -1 if data unavailable
 """
 
 import sqlite3
-import pandas as pd
 import sys
 import os
 
-
-def find_sqlite_file(path):
-    """Find SQLite file in directory or return path if it's already a .sqlite file"""
-    # Convert to absolute path to avoid any relative path issues
-    path = os.path.abspath(path)
-    
-    if os.path.isfile(path) and path.endswith('.sqlite'):
-        return path
-    
-    if os.path.isdir(path):
-        sqlite_files = [f for f in os.listdir(path) if f.endswith('.sqlite')]
-        if len(sqlite_files) == 0:
-            return None
-        # Prefer non-profiling files
-        non_profiling = [f for f in sqlite_files if 'profiling' not in f.lower()]
-        if non_profiling:
-            return os.path.abspath(os.path.join(path, non_profiling[0]))
-        return os.path.abspath(os.path.join(path, sqlite_files[0]))
-    
-    return None
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from trace_metric_utils import find_sqlite_file, get_trace_types, load_yaml
 
 
-def calculate_metric(path):
-    """
-    Calculate metric from SQLite trace file.
-    
-    Args:
-        path: Either a directory containing .sqlite file or direct path to .sqlite file
-    
-    Returns:
-        float: Metric value, or -1 if calculation fails
-    """
-    # Find the SQLite file
+def _calc_nsys(path: str) -> float:
     sqlite_path = find_sqlite_file(path)
     if sqlite_path is None:
-        print(f"Error: No .sqlite file found in {path}", file=sys.stderr)
-        return -1
-    
+        print(f"[average_memory_bandwidth/nsys] No .sqlite file found in {path}", file=sys.stderr)
+        return -1.0
+
     try:
         conn = sqlite3.connect(sqlite_path)
-        
-        # Check if memcpy table exists
-        tables = pd.read_sql_query("""
-            SELECT name FROM sqlite_master 
+        cursor = conn.cursor()
+        has_memcpy = cursor.execute(
+            """
+            SELECT name FROM sqlite_master
             WHERE type='table' AND name='CUPTI_ACTIVITY_KIND_MEMCPY'
-        """, conn)
-        
-        if len(tables) == 0:
+            LIMIT 1
+            """
+        ).fetchone()
+        if not has_memcpy:
             conn.close()
-            return -1
-        
-        # Load memory copy data
-        memcpy = pd.read_sql_query("""
-            SELECT 
-                (end - start) as duration,
-                bytes
+            return -1.0
+
+        memcpy_rows = cursor.execute(
+            """
+            SELECT (end - start) as duration, bytes
             FROM CUPTI_ACTIVITY_KIND_MEMCPY
-        """, conn)
-        
+            """
+        ).fetchall()
         conn.close()
-        
-        if len(memcpy) == 0:
-            return -1
-        
-        # Calculate bandwidth in GB/s for each transfer
-        # bytes / nanoseconds * 1e9 / 1e9 = GB/s
-        memcpy['bandwidth_GBs'] = (memcpy['bytes'] / memcpy['duration']) * 1e9 / 1e9
-        
-        # Filter out invalid values
-        memcpy = memcpy[memcpy['bandwidth_GBs'] > 0]
-        
-        if len(memcpy) == 0:
-            return -1
-        
-        return float(memcpy['bandwidth_GBs'].mean())
-        
+
+        if not memcpy_rows:
+            return -1.0
+
+        bandwidths = []
+        for duration, byte_count in memcpy_rows:
+            if not duration or not byte_count:
+                continue
+            bandwidth_gbps = (byte_count / duration) * 1e9 / 1e9
+            if bandwidth_gbps > 0:
+                bandwidths.append(bandwidth_gbps)
+
+        if not bandwidths:
+            return -1.0
+
+        return float(sum(bandwidths) / len(bandwidths))
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return -1
+        print(f"[average_memory_bandwidth/nsys] {e}", file=sys.stderr)
+        return -1.0
+
+
+def metric_cal(directory: str) -> float:
+    yaml_data = load_yaml(directory)
+    trace_types = get_trace_types(yaml_data)
+
+    if "nsys" in trace_types:
+        return _calc_nsys(directory)
+    if "json" in trace_types or "json_tpu" in trace_types:
+        print(
+            f"[average_memory_bandwidth] No real memory bandwidth counters available for trace types {trace_types}",
+            file=sys.stderr,
+        )
+        return -1.0
+
+    print(f"[average_memory_bandwidth] No supported trace type in {trace_types}", file=sys.stderr)
+    return -1.0
+
+
+def calculate_metric(path: str) -> float:
+    """Backward-compatible wrapper used by older imports."""
+    return metric_cal(path)
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python average_memory_bandwidth_group_9.py <trace_directory_or_sqlite_file>")
         sys.exit(1)
-    
-    result = calculate_metric(sys.argv[1])
-    print(result)
+
+    print(metric_cal(sys.argv[1]))

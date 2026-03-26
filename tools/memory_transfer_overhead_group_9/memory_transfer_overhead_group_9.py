@@ -1,107 +1,116 @@
 """
 Metric: memory_transfer_overhead
-Description: Percentage of trace time spent in memory copy operations (memcpy). High values
-             indicate memory transfer bottlenecks, often from PCIe transfers or inefficient
-             data movement.
+Description: Percentage of trace time spent in memory transfer operations.
+             For NSYS traces, this is derived from CUPTI memcpy activity.
+             For Kineto JSON traces, this is estimated from copy-like kernel names.
 Unit: Percentage (%)
 Returns: Float between 0-100, or -1 if data unavailable
 """
 
 import sqlite3
-import pandas as pd
 import sys
 import os
 
-
-def find_sqlite_file(path):
-    """Find SQLite file in directory or return path if it's already a .sqlite file"""
-    # Convert to absolute path to avoid any relative path issues
-    path = os.path.abspath(path)
-    
-    if os.path.isfile(path) and path.endswith('.sqlite'):
-        return path
-    
-    if os.path.isdir(path):
-        sqlite_files = [f for f in os.listdir(path) if f.endswith('.sqlite')]
-        if len(sqlite_files) == 0:
-            return None
-        # Prefer non-profiling files
-        non_profiling = [f for f in sqlite_files if 'profiling' not in f.lower()]
-        if non_profiling:
-            return os.path.abspath(os.path.join(path, non_profiling[0]))
-        return os.path.abspath(os.path.join(path, sqlite_files[0]))
-    
-    return None
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from trace_metric_utils import (
+    find_sqlite_file,
+    get_trace_types,
+    load_yaml,
+    summarize_kineto_kernel_breakdown,
+)
 
 
-def calculate_metric(path):
-    """
-    Calculate metric from SQLite trace file.
-    
-    Args:
-        path: Either a directory containing .sqlite file or direct path to .sqlite file
-    
-    Returns:
-        float: Metric value, or -1 if calculation fails
-    """
-    # Find the SQLite file
+def _calc_nsys(path: str) -> float:
     sqlite_path = find_sqlite_file(path)
     if sqlite_path is None:
-        print(f"Error: No .sqlite file found in {path}", file=sys.stderr)
-        return -1
-    
+        print(f"[memory_transfer_overhead/nsys] No .sqlite file found in {path}", file=sys.stderr)
+        return -1.0
+
     try:
         conn = sqlite3.connect(sqlite_path)
-        
-        # Check if memcpy table exists
-        tables = pd.read_sql_query("""
-            SELECT name FROM sqlite_master 
+        cursor = conn.cursor()
+        has_memcpy = cursor.execute(
+            """
+            SELECT 1 FROM sqlite_master
             WHERE type='table' AND name='CUPTI_ACTIVITY_KIND_MEMCPY'
-        """, conn)
-        
-        if len(tables) == 0:
+            LIMIT 1
+            """
+        ).fetchone()
+        if not has_memcpy:
             conn.close()
-            return -1
-        
-        # Load memory copy data
-        memcpy = pd.read_sql_query("""
-            SELECT 
-                start, end,
-                (end - start) as duration
+            return -1.0
+
+        memcpy_rows = cursor.execute(
+            """
+            SELECT start, end, (end - start) as duration
             FROM CUPTI_ACTIVITY_KIND_MEMCPY
-        """, conn)
-        
-        # Load kernel data for trace duration
-        kernels = pd.read_sql_query("""
+            """
+        ).fetchall()
+        kernel_rows = cursor.execute(
+            """
             SELECT start, end
             FROM CUPTI_ACTIVITY_KIND_KERNEL
-        """, conn)
-        
+            """
+        ).fetchall()
         conn.close()
-        
-        if len(memcpy) == 0 or len(kernels) == 0:
-            return -1
-        
-        total_memcpy_time = memcpy['duration'].sum()
-        # Use the full activity span including both kernels and memcpy
-        trace_start = min(kernels['start'].min(), memcpy['start'].min())
-        trace_end = max(kernels['end'].max(), memcpy['end'].max())
+
+        if not memcpy_rows or not kernel_rows:
+            return -1.0
+
+        total_memcpy_time = sum(row[2] for row in memcpy_rows if row[2] is not None)
+        trace_start = min(min(row[0] for row in kernel_rows), min(row[0] for row in memcpy_rows))
+        trace_end = max(max(row[1] for row in kernel_rows), max(row[1] for row in memcpy_rows))
         trace_duration = trace_end - trace_start
 
-        if trace_duration == 0:
-            return -1
-        
+        if trace_duration <= 0:
+            return -1.0
+
         return float((total_memcpy_time / trace_duration) * 100)
-        
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return -1
+        print(f"[memory_transfer_overhead/nsys] {e}", file=sys.stderr)
+        return -1.0
+
+
+def _calc_json(directory: str) -> float:
+    summary = summarize_kineto_kernel_breakdown(directory)
+    if summary is None:
+        return -1.0
+
+    total_kernel_dur, breakdown = summary
+    mem_transfer_dur = breakdown.get("memory_transfer", 0.0)
+    if total_kernel_dur <= 0:
+        return -1.0
+
+    return round((mem_transfer_dur / total_kernel_dur) * 100.0, 4)
+
+
+def metric_cal(directory: str) -> float:
+    yaml_data = load_yaml(directory)
+    trace_types = get_trace_types(yaml_data)
+
+    if "nsys" in trace_types:
+        return _calc_nsys(directory)
+    if "json" in trace_types:
+        return _calc_json(directory)
+    if "json_tpu" in trace_types:
+        print(
+            f"[memory_transfer_overhead] json_tpu traces are not supported for {directory}",
+            file=sys.stderr,
+        )
+        return -1.0
+
+    print(f"[memory_transfer_overhead] No supported trace type in {trace_types}", file=sys.stderr)
+    return -1.0
+
+
+def calculate_metric(path: str) -> float:
+    """Backward-compatible wrapper used by older imports."""
+    return metric_cal(path)
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python memory_transfer_overhead_group_9.py <trace_directory_or_sqlite_file>")
         sys.exit(1)
-    
-    result = calculate_metric(sys.argv[1])
-    print(result)
+
+    print(metric_cal(sys.argv[1]))
