@@ -439,6 +439,98 @@ Interpretation notes:
   the vLLM latency JSON for end-to-end throughput; review this before making
   a performance claim from MFU alone.
 
+## Larger-Sequence Follow-up
+
+Eric's feedback was that the original `batch=1, seq_len=1048` style traces were
+too small to drive GPU utilization, and that batch size should be interpreted as
+global batch size. After the batch-128 short-sequence rows, a cherry-picked
+larger-sequence pass was collected for the model families where the communication
+experiments were most useful:
+
+- `qwen3-4b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter`
+- `qwen3-4b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter`
+- `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter`
+- `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter`
+- `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-nccl-perlmutter`
+- `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-puremscclpp-perlmutter`
+
+Scripts:
+
+- `scripts/run_vllm_longseq_kineto_perlmutter.sh`
+- `scripts/make_vllm_longseq_bundles_perlmutter.sh`
+- `scripts/launch_vllm_longseq_kineto_perlmutter.sh`
+- `scripts/run_vllm_longseq_deepseek_kineto_perlmutter.sh`
+- `scripts/make_vllm_longseq_deepseek_bundles_perlmutter.sh`
+- `scripts/launch_vllm_longseq_deepseek_perlmutter.sh`
+
+The first launch attempted DeepSeek with `input_len=4096, output_len=128`, but
+DeepSeek-MoE-16B has `max_position_embeddings=4096`, so vLLM rejected
+`max_model_len=4224`. The DeepSeek rows were retried with
+`input_len=3968, output_len=128`, giving `seq_len=4096` without using
+`VLLM_ALLOW_LONG_MAX_MODEL_LEN`.
+
+Perlmutter source bundles:
+
+```text
+/pscratch/sd/k/kg597/ccl-bench-traces/vllm-longseq-kineto-bundles
+```
+
+The full source bundles on Perlmutter keep all four rank traces. The `/data`
+copies intentionally keep the files required by the website only:
+
+- workload YAML
+- `README.md`
+- `.sqlite`
+- `.nsys-rep`
+- `.latency.json`
+- `rank0_trace.json`
+
+This avoids copying multiple GB of rank1-rank3 JSON over the local
+Perlmutter-to-lambda relay. The full traces remain available on Perlmutter.
+
+Verified `/data` bundle sizes after the minimal copy:
+
+| Bundle | Size |
+|---|---:|
+| `qwen3-4b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter` | 580M |
+| `qwen3-4b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter` | 401M |
+| `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter` | 469M |
+| `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter` | 320M |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-nccl-perlmutter` | 787M |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-puremscclpp-perlmutter` | 532M |
+
+Kernel validation from NSYS SQLite:
+
+| Row | NCCL kernels | MSCCL++ kernels | vLLM custom reduce |
+|---|---:|---:|---:|
+| `qwen3-4b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter` | 6.819s | 0.000s | 15.820s |
+| `qwen3-4b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter` | 0.000s | 21.108s | 0.000s |
+| `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter` | 9.786s | 0.000s | 9.688s |
+| `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter` | 0.000s | 16.872s | 0.000s |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-nccl-perlmutter` | 4.245s | 0.000s | 34.510s |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-puremscclpp-perlmutter` | 0.000s | 28.108s | 0.000s |
+
+Final larger-sequence comparison after website regeneration:
+
+| Row | Comm | Batch | Input | Output | Step Time | MFU | Dom Kern | Mem Bound | Avg Mem BW | Mem Xfer OH | MoE | Comm Frac | Comm Time |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `qwen3-4b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter` | NCCL | 64 | 4096 | 128 | 0.0448 | 91.62 | 27.56 | 40.94 | 7.94 | 12.70 | 0.00 | 39.43 | 22.64 |
+| `qwen3-4b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter` | MSCCL++ | 64 | 4096 | 128 | 0.0477 | 87.17 | 25.09 | 39.48 | 2.42 | 13.50 | 0.00 | 37.99 | 21.11 |
+| `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter` | NCCL | 64 | 4096 | 128 | 0.0353 | 126.78 | 39.33 | 28.96 | 6.11 | 21.40 | 0.00 | 28.88 | 19.47 |
+| `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter` | MSCCL++ | 64 | 4096 | 128 | 0.0412 | 121.36 | 40.99 | 26.32 | 2.35 | 22.41 | 0.00 | 26.23 | 16.87 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-nccl-perlmutter` | NCCL | 32 | 3968 | 128 | 0.0804 | 23.39 | 55.53 | 66.07 | 10.92 | 42.58 | 14.18 | 62.36 | 38.75 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-puremscclpp-perlmutter` | MSCCL++ | 32 | 3968 | 128 | 0.0824 | 23.80 | 46.47 | 59.23 | 10.60 | 45.70 | 17.00 | 54.82 | 28.11 |
+
+Interpretation notes:
+
+- The larger-sequence rows answer the feedback that the previous global batch
+  and sequence length were too small.
+- Pure MSCCL++ again reduces communication time/fraction, but end-to-end step
+  time is slightly slower for all three cherry-picked comparisons.
+- Llama MFU exceeds 100% under the current prefill-heavy MFU formula. Treat it
+  as a relative throughput signal for this table, not as a literal hardware
+  utilization claim.
+
 ## Second Pass: vLLM Kineto JSON Collection
 
 The second pass collected Kineto JSON traces for three model families, two batch
@@ -978,14 +1070,24 @@ Collection/reproduction scripts:
 - `scripts/run_llama_deepseek_kineto_mscclpp_perlmutter.sh`
 - `scripts/make_llama_deepseek_kineto_mscclpp_bundles_perlmutter.sh`
 - `scripts/launch_llama_deepseek_kineto_mscclpp_perlmutter.sh`
+- `scripts/run_pure_mscclpp_batch128_perlmutter.sh`
+- `scripts/make_pure_mscclpp_batch128_bundles_perlmutter.sh`
+- `scripts/launch_pure_mscclpp_batch128_perlmutter.sh`
+- `scripts/run_vllm_longseq_kineto_perlmutter.sh`
+- `scripts/make_vllm_longseq_bundles_perlmutter.sh`
+- `scripts/launch_vllm_longseq_kineto_perlmutter.sh`
+- `scripts/run_vllm_longseq_deepseek_kineto_perlmutter.sh`
+- `scripts/make_vllm_longseq_deepseek_bundles_perlmutter.sh`
+- `scripts/launch_vllm_longseq_deepseek_perlmutter.sh`
 - `scripts/vllm_kineto_perlmutter_workflow.md`
 
 Trace collection cards:
 
 - The six model/batch bundle YAML files and eight Qwen comm-matrix YAML files
-  plus the four Llama/DeepSeek MSCCL++ YAML files should be committed under
-  `trace_collection/` if the repository convention is to include workload
-  cards locally.
+  plus the four Llama/DeepSeek MSCCL++ YAML files, four pure-MSCCL++ batch-128
+  YAML files, and six larger-sequence YAML files should be committed under
+  `trace_collection/` if the repository convention is to include workload cards
+  locally.
 - The large JSON, SQLite, and NSYS artifacts should not be committed to git.
   They should live in `/data/ccl-bench_trace_collection`.
 
@@ -998,8 +1100,9 @@ Avoid committing unrelated local scratch files:
 
 ## Immediate Next Steps
 
-1. Inspect the 53-row preview in `http://localhost:8081/`, especially the Qwen,
-   Llama, and DeepSeek NCCL/MSCCL++ comparisons.
+1. Inspect the 63-row preview in `http://localhost:8081/`, especially the Qwen,
+   Llama, and DeepSeek NCCL/MSCCL++/pure-MSCCL++ comparisons and the six
+   larger-sequence rows.
 2. Confirm whether the `None` values are acceptable for this PR.
 3. Decide whether the new rows should keep `metrics: "auto"` or explicitly
    list only defensible metrics.
@@ -1010,6 +1113,8 @@ Avoid committing unrelated local scratch files:
      Time/MFU
    - six model/batch rows: Qwen, Llama, and DeepSeek batch-size comparison
    - four follow-up rows: Llama and DeepSeek NCCL+MSCCL++ comparison
+   - four pure-MSCCL++ batch-128 rows
+   - six larger-sequence rows
 5. Commit only the necessary files to PR #35 after review.
 
 ## Recommended PR Message
@@ -1024,6 +1129,7 @@ Add Perlmutter vLLM Kineto benchmark rows and extend JSON metrics for vLLM.
 - Add Perlmutter vLLM batch8/batch128 rows for Qwen3-4B, Llama-3.1-8B, and DeepSeek-MoE-16B.
 - Add explicit Qwen3-4B NCCL vs NCCL+MSCCL++ rows for TP2/TP4 and batch8/batch128.
 - Add Llama-3.1-8B and DeepSeek-MoE-16B NCCL+MSCCL++ comparison rows.
+- Add pure-MSCCL++ batch-128 rows and larger-sequence rows for Qwen3-4B, Llama-3.1-8B, and DeepSeek-MoE-16B.
 - Regenerate website benchmark data from /data/ccl-bench_trace_collection.
 ```
 
