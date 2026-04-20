@@ -2,7 +2,7 @@ version: 1
 
 description: >
   Qwen3-4B inference, TP=4, batch size 8.
-  Traces were collected on Perlmutter with vLLM bench latency, PyTorch Kineto
+  Global batch size is 8 requests. Traces were collected on Perlmutter with vLLM bench latency, PyTorch Kineto
   profiler, and Nsight Systems. Input length is 1024 and output length is 128.
 
 hf_url: https://huggingface.co/Qwen/Qwen3-4B
@@ -28,7 +28,10 @@ workload:
       head_dim: 128
   data:
     batch_size: 8
-    seq_len: 1152
+    batch_size_scope: global
+    input_len: 1024
+    output_len: 128
+    seq_len: 1152 # input_len + output_len
     dataset: random_1024_input_128_output
   hardware:
     network_topo:
@@ -45,7 +48,8 @@ workload:
 
 Model-executor:
   framework:
-    name: vllm-0.19.0
+    name: vllm
+    version: "0.19.0"
     compiler_tool_selection: plain_pytorch
   model_plan_parallelization:
     dp_replicate: 1

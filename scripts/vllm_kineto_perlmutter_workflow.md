@@ -122,6 +122,23 @@ Clarification from Eric's profiling note:
   because it reliably exposes CUDA kernel names such as NCCL kernels and
   MSCCL++ `allreducePacket` / `allreduceFullmesh`.
 
+Workload-card cleanup after Eric's template note:
+
+- `batch_size` is treated as global batch size. The generated GPU vLLM cards
+  now include `batch_size_scope: global` under `workload.data`.
+- The actual run used `input_len=1024` and `output_len=128`. The cards now
+  include those fields explicitly.
+- `seq_len` remains `1152` for these already-generated rows because the MFU
+  tool currently uses `batch_size * seq_len / avg_latency`; changing it to
+  `1024` would silently change existing MFU values. The cards document
+  `seq_len` as `input_len + output_len` for these runs.
+- The framework block now uses `name: vllm` plus `version: "0.19.0"` to better
+  match the workload-card template style while preserving the exact vLLM
+  version.
+- For future TPU-vs-GPU comparability, we should decide before collection
+  whether `seq_len` means input length only or input+output total and keep that
+  convention consistent across TPU and GPU cards.
+
 ## Qwen3-4B Kineto NCCL vs MSCCL++ Matrix
 
 The four original Qwen3-4B rows could not be retrofitted with Step Time or MFU

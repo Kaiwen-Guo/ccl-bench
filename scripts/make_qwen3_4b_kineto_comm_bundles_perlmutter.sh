@@ -40,9 +40,9 @@ version: 1
 
 description: >
   Qwen3-4B inference, TP=${tp}, batch size ${batch}, communication=${comm_name}.
-  Traces were collected on Perlmutter with vLLM bench latency, PyTorch Kineto
+  Global batch size is ${batch} requests. Traces were collected on Perlmutter with vLLM bench latency, PyTorch Kineto
   profiler, and Nsight Systems. Input length is ${INPUT_LEN} and output length
-  is ${OUTPUT_LEN}.
+  is ${OUTPUT_LEN}; seq_len records input plus output tokens for MFU accounting.
 
 hf_url: https://huggingface.co/Qwen/Qwen3-4B
 trace_url: ${TRACE_URL_ROOT}/${name}
@@ -66,7 +66,10 @@ workload:
       head_dim: 128
   data:
     batch_size: ${batch}
-    seq_len: ${SEQ_LEN}
+    batch_size_scope: global
+    input_len: ${INPUT_LEN}
+    output_len: ${OUTPUT_LEN}
+    seq_len: ${SEQ_LEN} # input_len + output_len
     dataset: random_${INPUT_LEN}_input_${OUTPUT_LEN}_output
   hardware:
     network_topo:
@@ -83,7 +86,8 @@ workload:
 
 Model-executor:
   framework:
-    name: vllm-0.19.0
+    name: vllm
+    version: "0.19.0"
     compiler_tool_selection: plain_pytorch
   model_plan_parallelization:
     dp_replicate: 1

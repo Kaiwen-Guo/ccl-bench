@@ -43,8 +43,9 @@ version: 1
 
 description: >
   ${desc}
-  Traces were collected on Perlmutter with vLLM bench latency, PyTorch Kineto
-  profiler, and Nsight Systems. Input length is 1024 and output length is 128.
+  Global batch size is ${batch} requests. Traces were collected on Perlmutter with vLLM bench latency, PyTorch Kineto
+  profiler, and Nsight Systems. Input length is 1024 and output length is 128;
+  seq_len records input plus output tokens for MFU accounting.
 
 hf_url: ${hf_url}
 trace_url: ${TRACE_URL_ROOT}/${name}
@@ -69,7 +70,10 @@ ${active_params_yaml}
       head_dim: ${head_dim}
   data:
     batch_size: ${batch}
-    seq_len: ${seq_len}
+    batch_size_scope: global
+    input_len: 1024
+    output_len: 128
+    seq_len: ${seq_len} # input_len + output_len
     dataset: random_1024_input_128_output
   hardware:
     network_topo:
@@ -86,7 +90,8 @@ ${active_params_yaml}
 
 Model-executor:
   framework:
-    name: ${framework}
+    name: vllm
+    version: "0.19.0"
     compiler_tool_selection: ${compiler}
   model_plan_parallelization:
     dp_replicate: 1
@@ -146,7 +151,7 @@ bundle_one() {
 
   write_yaml "$dst/$bundle_name.yaml" "$bundle_name" "$desc" "$hf_url" "$moe" "$family" \
     "$num_params" "$num_params_embedding" "$layers" "$heads" "$head_dim" "$batch" 1152 4 \
-    "vllm-0.19.0" "disabled" "$tp" "$ep" "$num_params_active"
+    "vllm" "plain_pytorch" "$tp" "$ep" "$num_params_active"
 
   local i=0
   while IFS= read -r trace; do
