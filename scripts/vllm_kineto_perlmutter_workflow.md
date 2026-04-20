@@ -107,6 +107,21 @@ Why those four rows still lack Step Time/MFU:
   types (`json_tpu`, `json`), not NSYS.
 - This is consistent with existing vLLM NSYS rows in the repository.
 
+Clarification from Eric's profiling note:
+
+- vLLM can collect torch-profiler JSON traces. In vLLM 0.19.0 the latency
+  benchmark path calls `llm.start_profile()` / `llm.stop_profile()` when
+  `--profile` is used with `--profiler-config.profiler=torch` and an absolute
+  `--profiler-config.torch_profiler_dir=...`.
+- That output is the PyTorch profiler / Kineto JSON artifact. In other words,
+  "torch JSON trace" and "Kineto JSON trace" refer to the same class of trace
+  for this workflow.
+- The old four NSYS-only Qwen rows cannot be retrofitted with torch JSON after
+  the fact. The same workload has to be rerun with torch profiling enabled.
+- NSYS SQLite is still needed for the current kernel-level website metrics
+  because it reliably exposes CUDA kernel names such as NCCL kernels and
+  MSCCL++ `allreducePacket` / `allreduceFullmesh`.
+
 ## Qwen3-4B Kineto NCCL vs MSCCL++ Matrix
 
 The four original Qwen3-4B rows could not be retrofitted with Step Time or MFU
@@ -322,6 +337,90 @@ Interpretation notes:
 - This still should be described as `NCCL+MSCCL++`, not pure MSCCL++, because
   LD_PRELOAD only interposes selected NCCL calls and earlier NSYS evidence
   showed AllReduce remaining NCCL.
+
+## Pure MSCCL++ Batch-128 Follow-up
+
+To test pure MSCCL++ rather than the mixed `NCCL+MSCCL++` path, the batch-128
+rows were collected again with:
+
+- `LD_PRELOAD=$HOME/mscclpp/build/lib/libmscclpp_nccl.so`
+- `VLLM_NCCL_SO_PATH=$HOME/mscclpp/build/lib/libmscclpp_nccl.so`
+- `MSCCLPP_NCCL_LIB_PATH` unset
+- `--disable-custom-all-reduce`
+
+The `VLLM_NCCL_SO_PATH` setting is required because vLLM's pynccl wrapper
+loads NCCL with `ctypes.CDLL(...)`; `LD_PRELOAD` alone does not force pynccl to
+use the shim. With the shim loaded directly and NCCL fallback unset, NSYS shows
+MSCCL++ native kernels (`allreducePacket`, `allreduceFullmesh`,
+`allgatherFullmesh2`) and no `ncclDevKernel_*` kernels.
+
+Scripts:
+
+- `scripts/run_pure_mscclpp_batch128_perlmutter.sh`
+- `scripts/make_pure_mscclpp_batch128_bundles_perlmutter.sh`
+- `scripts/launch_pure_mscclpp_batch128_perlmutter.sh`
+
+Bundles were created under:
+
+```text
+/pscratch/sd/k/kg597/ccl-bench-traces/pure-mscclpp-batch128-bundles
+```
+
+and transferred to:
+
+```text
+/data/ccl-bench_trace_collection
+```
+
+Verified bundle sizes on `/data`:
+
+| Bundle | Size |
+|---|---:|
+| `qwen3-4b-vllm-tp2-batch128-puremscclpp-perlmutter` | 673M |
+| `qwen3-4b-vllm-tp4-batch128-puremscclpp-perlmutter` | 1.4G |
+| `llama-3.1-8b-vllm-tp4-batch128-puremscclpp-perlmutter` | 1.1G |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch128-puremscclpp-perlmutter` | 1.6G |
+
+Kernel validation from NSYS SQLite:
+
+| Row | allreducePacket | allreduceFullmesh | allgatherFullmesh2 | NCCL kernels |
+|---|---:|---:|---:|---:|
+| `qwen3-4b-vllm-tp2-batch128-puremscclpp-perlmutter` | 5.032s | 3.680s | 0.224s | 0 |
+| `qwen3-4b-vllm-tp4-batch128-puremscclpp-perlmutter` | 21.269s | 5.326s | 0.331s | 0 |
+| `llama-3.1-8b-vllm-tp4-batch128-puremscclpp-perlmutter` | 14.463s | 7.800s | 0.343s | 0 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch128-puremscclpp-perlmutter` | 28.064s | 5.756s | 0.253s | 0 |
+
+Batch-128 NCCL vs mixed NCCL+MSCCL++ vs pure MSCCL++ comparison after website
+regeneration:
+
+| Row | Comm | Step Time | MFU | Dom Kern | Mem Bound | Avg Mem BW | Mem Xfer OH | MoE | Comm Frac | Comm Time |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `qwen3-4b-vllm-tp2-batch128-nccl-perlmutter` | NCCL | 0.0419 | 45.47 | 30.21 | 29.93 | 12.70 | 10.65 | 0.00 | 29.59 | 10.57 |
+| `qwen3-4b-vllm-tp2-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0413 | 44.89 | 31.60 | 29.87 | 12.05 | 11.52 | 0.00 | 29.53 | 10.19 |
+| `qwen3-4b-vllm-tp2-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0444 | 88.71 | 31.13 | 25.86 | 2.60 | 9.86 | 0.00 | 25.47 | 8.95 |
+| `qwen3-4b-vllm-tp4-batch128-nccl-perlmutter` | NCCL | 0.0436 | 58.14 | 38.59 | 51.14 | 21.46 | 13.06 | 0.00 | 49.54 | 29.50 |
+| `qwen3-4b-vllm-tp4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0429 | 55.29 | 36.44 | 48.31 | 23.73 | 13.69 | 0.00 | 46.51 | 27.70 |
+| `qwen3-4b-vllm-tp4-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0459 | 53.07 | 36.56 | 48.28 | 2.33 | 12.92 | 0.00 | 46.48 | 27.04 |
+| `llama-3.1-8b-vllm-tp4-batch128-perlmutter` | NCCL | 0.0366 | 96.36 | 29.75 | 37.29 | 14.63 | 21.01 | 0.00 | 37.01 | 24.43 |
+| `llama-3.1-8b-vllm-tp4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0384 | 95.01 | 28.40 | 38.36 | 15.45 | 21.91 | 0.00 | 38.05 | 25.71 |
+| `llama-3.1-8b-vllm-tp4-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0389 | 90.69 | 29.50 | 34.60 | 2.37 | 21.58 | 0.00 | 34.26 | 22.73 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch128-perlmutter` | NCCL | 0.0812 | 24.44 | 44.16 | 56.63 | 17.62 | 34.44 | 19.20 | 53.65 | 49.50 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0760 | 23.03 | 36.58 | 49.77 | 18.25 | 35.81 | 22.27 | 46.41 | 38.14 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0767 | 21.14 | 36.18 | 47.38 | 14.73 | 37.31 | 23.35 | 43.93 | 34.07 |
+
+Interpretation notes:
+
+- Pure MSCCL++ is now confirmed by kernel names, not just environment
+  variables.
+- Pure MSCCL++ generally reduces communication time compared with NCCL and the
+  mixed NCCL+MSCCL++ path, especially for DeepSeek-MoE batch 128.
+- End-to-end step time does not uniformly improve. Qwen TP4 and Llama are
+  slower than the mixed path despite lower communication time, so the pure path
+  should be presented as a communication-kernel experiment, not a blanket
+  throughput win.
+- The Qwen TP2 MFU is higher than the adjacent rows because the MFU tool uses
+  the vLLM latency JSON for end-to-end throughput; review this before making
+  a performance claim from MFU alone.
 
 ## Second Pass: vLLM Kineto JSON Collection
 
