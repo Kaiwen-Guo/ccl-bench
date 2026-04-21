@@ -128,16 +128,15 @@ Workload-card cleanup after Eric's template note:
   now include `batch_size_scope: global` under `workload.data`.
 - The actual run used `input_len=1024` and `output_len=128`. The cards now
   include those fields explicitly.
-- `seq_len` remains `1152` for these already-generated rows because the MFU
-  tool currently uses `batch_size * seq_len / avg_latency`; changing it to
-  `1024` would silently change existing MFU values. The cards document
-  `seq_len` as `input_len + output_len` for these runs.
+- `seq_len` was corrected to the input length (`1024`) for the inference cards
+  after comparing against the current workload-card template and TPU vLLM rows,
+  where sequence length is documented as fixed input sequence length. Output
+  length remains recorded separately as `output_len`.
 - The framework block now uses `name: vllm` plus `version: "0.19.0"` to better
   match the workload-card template style while preserving the exact vLLM
   version.
-- For future TPU-vs-GPU comparability, we should decide before collection
-  whether `seq_len` means input length only or input+output total and keep that
-  convention consistent across TPU and GPU cards.
+- For future TPU-vs-GPU comparability, keep `seq_len` as input length for
+  vLLM inference cards unless the workload-card template changes explicitly.
 
 ## Qwen3-4B Kineto NCCL vs MSCCL++ Matrix
 
@@ -155,7 +154,7 @@ both Kineto JSON and NSYS for the full communication matrix:
 - Communication library: NCCL and NCCL+MSCCL++
 - Input length: 1024
 - Output length: 128
-- Sequence length recorded in YAML: 1152
+- Sequence length recorded in YAML: 1024
 - Precision: BF16
 - Hardware: 1 Perlmutter node, 4 x NVIDIA A100 40 GB
 
@@ -335,14 +334,14 @@ Final Llama/DeepSeek NCCL vs NCCL+MSCCL++ comparison after regeneration:
 
 | Row | Comm | Batch | Step Time | MFU | Dom Kern | Mem Bound | Avg Mem BW | Mem Xfer OH | MoE | Comm Frac | Comm Time |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `llama-3.1-8b-vllm-tp4-batch8-perlmutter` | NCCL | 8 | 0.0352 | 11.87 | 64.37 | 73.85 | 2.97 | 31.54 | 0.00 | 68.35 | 18.13 |
-| `llama-3.1-8b-vllm-tp4-batch8-mscclpp-perlmutter` | NCCL+MSCCL++ | 8 | 0.0379 | 10.98 | 65.65 | 74.05 | 3.10 | 31.41 | 0.00 | 68.42 | 19.71 |
-| `llama-3.1-8b-vllm-tp4-batch128-perlmutter` | NCCL | 128 | 0.0366 | 96.36 | 29.75 | 37.29 | 14.63 | 21.01 | 0.00 | 37.01 | 24.43 |
-| `llama-3.1-8b-vllm-tp4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 128 | 0.0384 | 95.01 | 28.40 | 38.36 | 15.45 | 21.91 | 0.00 | 38.05 | 25.71 |
-| `deepseek-moe-16b-vllm-tp4-ep4-batch8-perlmutter` | NCCL | 8 | 0.0721 | 1.93 | 78.84 | 89.95 | 3.39 | 26.98 | 7.32 | 82.15 | 53.93 |
-| `deepseek-moe-16b-vllm-tp4-ep4-batch8-mscclpp-perlmutter` | NCCL+MSCCL++ | 8 | 0.0708 | 1.95 | 61.02 | 79.70 | 3.60 | 38.97 | 14.83 | 63.73 | 21.28 |
-| `deepseek-moe-16b-vllm-tp4-ep4-batch128-perlmutter` | NCCL | 128 | 0.0812 | 24.44 | 44.16 | 56.63 | 17.62 | 34.44 | 19.20 | 53.65 | 49.50 |
-| `deepseek-moe-16b-vllm-tp4-ep4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 128 | 0.0760 | 23.03 | 36.58 | 49.77 | 18.25 | 35.81 | 22.27 | 46.41 | 38.14 |
+| `llama-3.1-8b-vllm-tp4-batch8-perlmutter` | NCCL | 8 | 0.0352 | 10.50 | 64.37 | 73.85 | 2.97 | 31.54 | 0.00 | 68.35 | 18.13 |
+| `llama-3.1-8b-vllm-tp4-batch8-mscclpp-perlmutter` | NCCL+MSCCL++ | 8 | 0.0379 | 9.71 | 65.65 | 74.05 | 3.10 | 31.41 | 0.00 | 68.42 | 19.71 |
+| `llama-3.1-8b-vllm-tp4-batch128-perlmutter` | NCCL | 128 | 0.0366 | 85.26 | 29.75 | 37.29 | 14.63 | 21.01 | 0.00 | 37.01 | 24.43 |
+| `llama-3.1-8b-vllm-tp4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 128 | 0.0384 | 84.06 | 28.40 | 38.36 | 15.45 | 21.91 | 0.00 | 38.05 | 25.71 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch8-perlmutter` | NCCL | 8 | 0.0721 | 1.70 | 78.84 | 89.95 | 3.39 | 26.98 | 7.32 | 82.15 | 53.93 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch8-mscclpp-perlmutter` | NCCL+MSCCL++ | 8 | 0.0708 | 1.72 | 61.02 | 79.70 | 3.60 | 38.97 | 14.83 | 63.73 | 21.28 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch128-perlmutter` | NCCL | 128 | 0.0812 | 21.60 | 44.16 | 56.63 | 17.62 | 34.44 | 19.20 | 53.65 | 49.50 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 128 | 0.0760 | 20.35 | 36.58 | 49.77 | 18.25 | 35.81 | 22.27 | 46.41 | 38.14 |
 
 Interpretation notes:
 
@@ -412,18 +411,18 @@ regeneration:
 
 | Row | Comm | Step Time | MFU | Dom Kern | Mem Bound | Avg Mem BW | Mem Xfer OH | MoE | Comm Frac | Comm Time |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `qwen3-4b-vllm-tp2-batch128-nccl-perlmutter` | NCCL | 0.0419 | 45.47 | 30.21 | 29.93 | 12.70 | 10.65 | 0.00 | 29.59 | 10.57 |
-| `qwen3-4b-vllm-tp2-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0413 | 44.89 | 31.60 | 29.87 | 12.05 | 11.52 | 0.00 | 29.53 | 10.19 |
-| `qwen3-4b-vllm-tp2-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0444 | 88.71 | 31.13 | 25.86 | 2.60 | 9.86 | 0.00 | 25.47 | 8.95 |
-| `qwen3-4b-vllm-tp4-batch128-nccl-perlmutter` | NCCL | 0.0436 | 58.14 | 38.59 | 51.14 | 21.46 | 13.06 | 0.00 | 49.54 | 29.50 |
-| `qwen3-4b-vllm-tp4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0429 | 55.29 | 36.44 | 48.31 | 23.73 | 13.69 | 0.00 | 46.51 | 27.70 |
-| `qwen3-4b-vllm-tp4-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0459 | 53.07 | 36.56 | 48.28 | 2.33 | 12.92 | 0.00 | 46.48 | 27.04 |
-| `llama-3.1-8b-vllm-tp4-batch128-perlmutter` | NCCL | 0.0366 | 96.36 | 29.75 | 37.29 | 14.63 | 21.01 | 0.00 | 37.01 | 24.43 |
-| `llama-3.1-8b-vllm-tp4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0384 | 95.01 | 28.40 | 38.36 | 15.45 | 21.91 | 0.00 | 38.05 | 25.71 |
-| `llama-3.1-8b-vllm-tp4-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0389 | 90.69 | 29.50 | 34.60 | 2.37 | 21.58 | 0.00 | 34.26 | 22.73 |
-| `deepseek-moe-16b-vllm-tp4-ep4-batch128-perlmutter` | NCCL | 0.0812 | 24.44 | 44.16 | 56.63 | 17.62 | 34.44 | 19.20 | 53.65 | 49.50 |
-| `deepseek-moe-16b-vllm-tp4-ep4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0760 | 23.03 | 36.58 | 49.77 | 18.25 | 35.81 | 22.27 | 46.41 | 38.14 |
-| `deepseek-moe-16b-vllm-tp4-ep4-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0767 | 21.14 | 36.18 | 47.38 | 14.73 | 37.31 | 23.35 | 43.93 | 34.07 |
+| `qwen3-4b-vllm-tp2-batch128-nccl-perlmutter` | NCCL | 0.0419 | 40.04 | 30.21 | 29.93 | 12.70 | 10.65 | 0.00 | 29.59 | 10.57 |
+| `qwen3-4b-vllm-tp2-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0413 | 39.52 | 31.60 | 29.87 | 12.05 | 11.52 | 0.00 | 29.53 | 10.19 |
+| `qwen3-4b-vllm-tp2-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0444 | 78.11 | 31.13 | 25.86 | 2.60 | 9.86 | 0.00 | 25.47 | 8.95 |
+| `qwen3-4b-vllm-tp4-batch128-nccl-perlmutter` | NCCL | 0.0436 | 51.19 | 38.59 | 51.14 | 21.46 | 13.06 | 0.00 | 49.54 | 29.50 |
+| `qwen3-4b-vllm-tp4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0429 | 48.68 | 36.44 | 48.31 | 23.73 | 13.69 | 0.00 | 46.51 | 27.70 |
+| `qwen3-4b-vllm-tp4-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0459 | 46.73 | 36.56 | 48.28 | 2.33 | 12.92 | 0.00 | 46.48 | 27.04 |
+| `llama-3.1-8b-vllm-tp4-batch128-perlmutter` | NCCL | 0.0366 | 85.26 | 29.75 | 37.29 | 14.63 | 21.01 | 0.00 | 37.01 | 24.43 |
+| `llama-3.1-8b-vllm-tp4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0384 | 84.06 | 28.40 | 38.36 | 15.45 | 21.91 | 0.00 | 38.05 | 25.71 |
+| `llama-3.1-8b-vllm-tp4-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0389 | 80.24 | 29.50 | 34.60 | 2.37 | 21.58 | 0.00 | 34.26 | 22.73 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch128-perlmutter` | NCCL | 0.0812 | 21.60 | 44.16 | 56.63 | 17.62 | 34.44 | 19.20 | 53.65 | 49.50 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch128-mscclpp-perlmutter` | NCCL+MSCCL++ | 0.0760 | 20.35 | 36.58 | 49.77 | 18.25 | 35.81 | 22.27 | 46.41 | 38.14 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch128-puremscclpp-perlmutter` | MSCCL++ | 0.0767 | 18.69 | 36.18 | 47.38 | 14.73 | 37.31 | 23.35 | 43.93 | 34.07 |
 
 Interpretation notes:
 
@@ -466,8 +465,9 @@ Scripts:
 The first launch attempted DeepSeek with `input_len=4096, output_len=128`, but
 DeepSeek-MoE-16B has `max_position_embeddings=4096`, so vLLM rejected
 `max_model_len=4224`. The DeepSeek rows were retried with
-`input_len=3968, output_len=128`, giving `seq_len=4096` without using
-`VLLM_ALLOW_LONG_MAX_MODEL_LEN`.
+`input_len=3968, output_len=128` without using `VLLM_ALLOW_LONG_MAX_MODEL_LEN`.
+The YAML `seq_len` remains `3968` because the inference cards record input
+length for MFU/prefill accounting, with `output_len` tracked separately.
 
 Perlmutter source bundles:
 
@@ -514,12 +514,12 @@ Final larger-sequence comparison after website regeneration:
 
 | Row | Comm | Batch | Input | Output | Step Time | MFU | Dom Kern | Mem Bound | Avg Mem BW | Mem Xfer OH | MoE | Comm Frac | Comm Time |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `qwen3-4b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter` | NCCL | 64 | 4096 | 128 | 0.0448 | 91.62 | 27.56 | 40.94 | 7.94 | 12.70 | 0.00 | 39.43 | 22.64 |
-| `qwen3-4b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter` | MSCCL++ | 64 | 4096 | 128 | 0.0477 | 87.17 | 25.09 | 39.48 | 2.42 | 13.50 | 0.00 | 37.99 | 21.11 |
-| `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter` | NCCL | 64 | 4096 | 128 | 0.0353 | 126.78 | 39.33 | 28.96 | 6.11 | 21.40 | 0.00 | 28.88 | 19.47 |
-| `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter` | MSCCL++ | 64 | 4096 | 128 | 0.0412 | 121.36 | 40.99 | 26.32 | 2.35 | 22.41 | 0.00 | 26.23 | 16.87 |
-| `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-nccl-perlmutter` | NCCL | 32 | 3968 | 128 | 0.0804 | 23.39 | 55.53 | 66.07 | 10.92 | 42.58 | 14.18 | 62.36 | 38.75 |
-| `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-puremscclpp-perlmutter` | MSCCL++ | 32 | 3968 | 128 | 0.0824 | 23.80 | 46.47 | 59.23 | 10.60 | 45.70 | 17.00 | 54.82 | 28.11 |
+| `qwen3-4b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter` | NCCL | 64 | 4096 | 128 | 0.0448 | 88.15 | 27.56 | 40.94 | 7.94 | 12.70 | 0.00 | 39.43 | 22.64 |
+| `qwen3-4b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter` | MSCCL++ | 64 | 4096 | 128 | 0.0477 | 83.87 | 25.09 | 39.48 | 2.42 | 13.50 | 0.00 | 37.99 | 21.11 |
+| `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-nccl-perlmutter` | NCCL | 64 | 4096 | 128 | 0.0353 | 122.43 | 39.33 | 28.96 | 6.11 | 21.40 | 0.00 | 28.88 | 19.47 |
+| `llama-3.1-8b-vllm-tp4-batch64-in4096-out128-puremscclpp-perlmutter` | MSCCL++ | 64 | 4096 | 128 | 0.0412 | 117.19 | 40.99 | 26.32 | 2.35 | 22.41 | 0.00 | 26.23 | 16.87 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-nccl-perlmutter` | NCCL | 32 | 3968 | 128 | 0.0804 | 22.54 | 55.53 | 66.07 | 10.92 | 42.58 | 14.18 | 62.36 | 38.75 |
+| `deepseek-moe-16b-vllm-tp4-ep4-batch32-in3968-out128-puremscclpp-perlmutter` | MSCCL++ | 32 | 3968 | 128 | 0.0824 | 22.94 | 46.47 | 59.23 | 10.60 | 45.70 | 17.00 | 54.82 | 28.11 |
 
 Interpretation notes:
 
@@ -527,9 +527,11 @@ Interpretation notes:
   and sequence length were too small.
 - Pure MSCCL++ again reduces communication time/fraction, but end-to-end step
   time is slightly slower for all three cherry-picked comparisons.
-- Llama MFU exceeds 100% under the current prefill-heavy MFU formula. Treat it
-  as a relative throughput signal for this table, not as a literal hardware
-  utilization claim.
+- Llama MFU still exceeds 100% after correcting `seq_len` to input length. That
+  is a metric-definition problem: the current MFU formula is training/prefill
+  flavored and is not an inference-aware prefill/decode FLOP model. Treat MFU
+  for vLLM inference rows as a caveat requiring tool work, not as a literal
+  hardware-utilization claim.
 
 ## Second Pass: vLLM Kineto JSON Collection
 
@@ -555,7 +557,7 @@ Common workload parameters:
 
 - Input length: 1024
 - Output length: 128
-- Sequence length recorded in YAML: 1152
+- Sequence length recorded in YAML: 1024
 - Batch sizes: 8 and 128
 - Precision: BF16
 - Hardware: 1 Perlmutter node, 4 x NVIDIA A100 40 GB
@@ -610,7 +612,7 @@ Batch is set in the YAML:
 workload:
   data:
     batch_size: 8
-    seq_len: 1152
+    seq_len: 1024
 ```
 
 or:
@@ -619,7 +621,7 @@ or:
 workload:
   data:
     batch_size: 128
-    seq_len: 1152
+    seq_len: 1024
 ```
 
 The model architecture fields were added so MFU can be computed:
@@ -706,9 +708,9 @@ Results:
 | qwen3-4b-vllm-tp4-batch8-perlmutter | 0.0428635 | 5.2227 |
 | qwen3-4b-vllm-tp4-batch128-perlmutter | 0.0479903 | 56.9764 |
 | llama-3.1-8b-vllm-tp4-batch8-perlmutter | 0.0352361 | 11.8712 |
-| llama-3.1-8b-vllm-tp4-batch128-perlmutter | 0.0365609 | 96.3578 |
-| deepseek-moe-16b-vllm-tp4-ep4-batch8-perlmutter | 0.0721431 | 1.9279 |
-| deepseek-moe-16b-vllm-tp4-ep4-batch128-perlmutter | 0.0812221 | 24.4402 |
+| llama-3.1-8b-vllm-tp4-batch128-perlmutter | 0.0365609 | 85.2567 |
+| deepseek-moe-16b-vllm-tp4-ep4-batch8-perlmutter | 0.0721431 | 1.7038 |
+| deepseek-moe-16b-vllm-tp4-ep4-batch128-perlmutter | 0.0812221 | 21.5991 |
 
 The large MFU for Llama batch 128 should be treated as a number to review
 before publication. It comes from the current repository MFU formula and vLLM
@@ -933,12 +935,12 @@ the values now stored in `website/benchmark_data.json`:
 
 | Row | Step Time | MFU | Dom Kern | Mem Bound | Avg Mem BW | Mem Xfer OH | MoE | Comm Frac | Total Comm |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| qwen3-4b-vllm-tp4-batch8-perlmutter | 0.0429 | 5.22 | 76.10 | 85.18 | 4.58 | 15.92 | 0.0 | 0.00398 | 27.86 |
-| qwen3-4b-vllm-tp4-batch128-perlmutter | 0.0480 | 56.98 | 34.69 | 47.43 | 18.11 | 13.23 | 0.0 | 0.00322 | 27.65 |
-| llama-3.1-8b-vllm-tp4-batch8-perlmutter | 0.0352 | 11.87 | 64.37 | 73.85 | 2.97 | 31.54 | 0.0 | 0.00464 | 18.13 |
-| llama-3.1-8b-vllm-tp4-batch128-perlmutter | 0.0366 | 96.36 | 29.75 | 37.29 | 14.63 | 21.01 | 0.0 | 0.00354 | 24.43 |
-| deepseek-moe-16b-vllm-tp4-ep4-batch8-perlmutter | 0.0721 | 1.93 | 78.84 | 89.95 | 3.39 | 26.98 | 7.32 | 0.00269 | 53.93 |
-| deepseek-moe-16b-vllm-tp4-ep4-batch128-perlmutter | 0.0812 | 24.44 | 44.16 | 56.63 | 17.62 | 34.44 | 19.20 | 0.00214 | 49.50 |
+| qwen3-4b-vllm-tp4-batch8-nccl-perlmutter | 0.0427 | 4.91 | 76.59 | 85.53 | 4.20 | 15.80 | 0.0 | 79.09 | 28.57 |
+| qwen3-4b-vllm-tp4-batch128-nccl-perlmutter | 0.0436 | 51.19 | 38.59 | 51.14 | 21.46 | 13.06 | 0.0 | 49.54 | 29.50 |
+| llama-3.1-8b-vllm-tp4-batch8-perlmutter | 0.0352 | 10.50 | 64.37 | 73.85 | 2.97 | 31.54 | 0.0 | 68.35 | 18.13 |
+| llama-3.1-8b-vllm-tp4-batch128-perlmutter | 0.0366 | 85.26 | 29.75 | 37.29 | 14.63 | 21.01 | 0.0 | 37.01 | 24.43 |
+| deepseek-moe-16b-vllm-tp4-ep4-batch8-perlmutter | 0.0721 | 1.70 | 78.84 | 89.95 | 3.39 | 26.98 | 7.32 | 82.15 | 53.93 |
+| deepseek-moe-16b-vllm-tp4-ep4-batch128-perlmutter | 0.0812 | 21.60 | 44.16 | 56.63 | 17.62 | 34.44 | 19.20 | 53.65 | 49.50 |
 
 Sanity check on `moe_fraction`: 0 for dense Qwen3-4B and Llama-3.1-8B, non-zero
 for DeepSeek-MoE (batch 128 keeps more experts active than batch 8, which is
@@ -967,7 +969,7 @@ string. Two existing rows use `plain_pytorch` for eager PyTorch, which is the
 closest match for `--enforce-eager` vLLM (no CUDA graphs, no torch.compile).
 All six YAMLs were changed to `compiler_tool_selection: plain_pytorch`.
 
-## Note on the MFU Value for Large-Batch Prefill-Heavy Runs
+## Note on vLLM Inference Step Time and MFU
 
 `mfu.py` computes
 ```
@@ -976,20 +978,28 @@ tokens/second = (batch_size * seq_len) / avg_latency
 MFU           = (FLOP/token · tokens/second) / (world_size · peak_TFLOPS)
 ```
 
-For `llama-3.1-8b-vllm-tp4-batch128-perlmutter` this gives 96.36%. The math
-checks out against the vLLM `avg_latency` (5.357s) and the hardware peak
-(312 TFLOPS × 4 GPUs). The large value comes from three compounding factors:
+For `llama-3.1-8b-vllm-tp4-batch128-perlmutter` this gives 85.26% after the
+`seq_len=input_len` correction. The math checks out against the vLLM
+`avg_latency` and the hardware peak (312 TFLOPS × 4 GPUs), but the metric
+should still be reviewed before publication. The larger-sequence Llama rows
+remain above 100%, which shows that the current formula is not defensible as a
+literal inference utilization metric.
 
-1. The run is prefill-heavy (1024 input + 128 output tokens per prompt), and
-   prefill is GEMM-dominated on A100 so very high MFU is physically possible.
-2. The formula charges prefill-level FLOPs to every token. A dedicated decode
-   MFU would subtract the K/V cache reuse and lower the number.
-3. `avg_latency` covers the whole batch end-to-end, and batch 128 × seq 1152
-   gives 147k token-equivalents on top of ~5s of work.
+Two caveats should be raised in review:
 
-In other words, 96% is the formula-level MFU of the run. It is not a parser
-bug. If the goal is to characterise decode-only throughput, the formula and
-the timing source should both be scoped to decode windows.
+- Step Time and MFU use different timing sources. `avg_step_time` uses Kineto
+  `execute_context_*` ranges, which are vLLM engine execution intervals. MFU
+  uses the vLLM benchmark latency JSON (`avg_latency`) to estimate tokens/sec.
+  These are intentionally different clocks, but they are easy to misread as the
+  same "step".
+- MFU uses a training/prefill-style FLOP model. It charges
+  `6 * (params - embeddings)` per token plus an attention term. For forward-only
+  vLLM inference, prefill and decode should be modeled separately and the
+  parameter term should not be assumed to match training-step accounting.
+
+In other words, the >100% Llama values are not a Kineto parsing failure and not
+a hardware result. They indicate that vLLM inference needs an inference-aware
+MFU metric, or MFU should be omitted for these rows until that tool work lands.
 
 ## Remaining `None` Values
 

@@ -7,7 +7,7 @@ TRACE_URL_ROOT="${TRACE_URL_ROOT:-/data/ccl-bench_trace_collection}"
 
 INPUT_LEN="${INPUT_LEN:-1024}"
 OUTPUT_LEN="${OUTPUT_LEN:-128}"
-SEQ_LEN="${SEQ_LEN:-1152}"
+SEQ_LEN="${SEQ_LEN:-1024}"
 BATCH_SIZES="${BATCH_SIZES:-8 128}"
 TP_SIZES="${TP_SIZES:-2 4}"
 COMM_VARIANTS="${COMM_VARIANTS:-nccl mscclpp}"
@@ -42,7 +42,7 @@ description: >
   Qwen3-4B inference, TP=${tp}, batch size ${batch}, communication=${comm_name}.
   Global batch size is ${batch} requests. Traces were collected on Perlmutter with vLLM bench latency, PyTorch Kineto
   profiler, and Nsight Systems. Input length is ${INPUT_LEN} and output length
-  is ${OUTPUT_LEN}; seq_len records input plus output tokens for MFU accounting.
+  is ${OUTPUT_LEN}; seq_len records input tokens for current MFU/prefill accounting.
 
 hf_url: https://huggingface.co/Qwen/Qwen3-4B
 trace_url: ${TRACE_URL_ROOT}/${name}
@@ -69,7 +69,7 @@ workload:
     batch_size_scope: global
     input_len: ${INPUT_LEN}
     output_len: ${OUTPUT_LEN}
-    seq_len: ${SEQ_LEN} # input_len + output_len
+    seq_len: ${SEQ_LEN} # input_len for MFU/prefill FLOP accounting
     dataset: random_${INPUT_LEN}_input_${OUTPUT_LEN}_output
   hardware:
     network_topo:

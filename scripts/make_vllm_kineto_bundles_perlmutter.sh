@@ -45,7 +45,7 @@ description: >
   ${desc}
   Global batch size is ${batch} requests. Traces were collected on Perlmutter with vLLM bench latency, PyTorch Kineto
   profiler, and Nsight Systems. Input length is 1024 and output length is 128;
-  seq_len records input plus output tokens for MFU accounting.
+  seq_len records input tokens for current MFU/prefill accounting.
 
 hf_url: ${hf_url}
 trace_url: ${TRACE_URL_ROOT}/${name}
@@ -73,7 +73,7 @@ ${active_params_yaml}
     batch_size_scope: global
     input_len: 1024
     output_len: 128
-    seq_len: ${seq_len} # input_len + output_len
+    seq_len: ${seq_len} # input_len for MFU/prefill FLOP accounting
     dataset: random_1024_input_128_output
   hardware:
     network_topo:
@@ -150,7 +150,7 @@ bundle_one() {
   mkdir -p "$dst" "$logs"
 
   write_yaml "$dst/$bundle_name.yaml" "$bundle_name" "$desc" "$hf_url" "$moe" "$family" \
-    "$num_params" "$num_params_embedding" "$layers" "$heads" "$head_dim" "$batch" 1152 4 \
+    "$num_params" "$num_params_embedding" "$layers" "$heads" "$head_dim" "$batch" 1024 4 \
     "vllm" "plain_pytorch" "$tp" "$ep" "$num_params_active"
 
   local i=0

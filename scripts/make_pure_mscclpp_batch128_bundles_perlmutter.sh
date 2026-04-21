@@ -7,7 +7,7 @@ TRACE_URL_ROOT="${TRACE_URL_ROOT:-/data/ccl-bench_trace_collection}"
 
 INPUT_LEN="${INPUT_LEN:-1024}"
 OUTPUT_LEN="${OUTPUT_LEN:-128}"
-SEQ_LEN="${SEQ_LEN:-1152}"
+SEQ_LEN="${SEQ_LEN:-1024}"
 BATCH="${BATCH:-128}"
 MSCCLPP_PRELOAD="${MSCCLPP_PRELOAD:-$HOME/mscclpp/build/lib/libmscclpp_nccl.so}"
 
@@ -33,7 +33,7 @@ description: >
   ${desc}
   Global batch size is ${batch} requests. Traces were collected on Perlmutter A100 with vLLM bench latency, PyTorch
   Kineto profiler, and Nsight Systems. Input length is ${INPUT_LEN} and output
-  length is ${OUTPUT_LEN}; seq_len records input plus output tokens for MFU accounting. Pure MSCCL++ via LD_PRELOAD and
+  length is ${OUTPUT_LEN}; seq_len records input tokens for current MFU/prefill accounting. Pure MSCCL++ via LD_PRELOAD and
   VLLM_NCCL_SO_PATH with --disable-custom-all-reduce and
   MSCCLPP_NCCL_LIB_PATH unset, so AllReduce and AllGather both run through
   MSCCL++ native kernels (fullmesh / packet) rather than vLLM's
@@ -64,7 +64,7 @@ ${active_yaml}      num_params_embedding: ${num_params_embedding}
     batch_size_scope: global
     input_len: ${INPUT_LEN}
     output_len: ${OUTPUT_LEN}
-    seq_len: ${SEQ_LEN} # input_len + output_len
+    seq_len: ${SEQ_LEN} # input_len for MFU/prefill FLOP accounting
     dataset: random_${INPUT_LEN}_input_${OUTPUT_LEN}_output
   hardware:
     network_topo:

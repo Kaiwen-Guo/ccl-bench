@@ -31,7 +31,7 @@ workload:
     batch_size_scope: global
     input_len: 1024
     output_len: 128
-    seq_len: 1152 # input_len + output_len
+    seq_len: 1024 # input_len for MFU/prefill FLOP accounting
     dataset: random_1024_input_128_output
   hardware:
     network_topo:

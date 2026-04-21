@@ -7,7 +7,7 @@ TRACE_URL_ROOT="${TRACE_URL_ROOT:-/data/ccl-bench_trace_collection}"
 
 INPUT_LEN="${INPUT_LEN:-3968}"
 OUTPUT_LEN="${OUTPUT_LEN:-128}"
-SEQ_LEN="${SEQ_LEN:-4096}"
+SEQ_LEN="${SEQ_LEN:-3968}"
 BATCH="${BATCH:-32}"
 
 mkdir -p "$BUNDLE_ROOT"
@@ -37,8 +37,8 @@ description: >
   ${INPUT_LEN}, communication=${comm_name}. Global batch size is ${BATCH}
   requests. Traces were collected on Perlmutter A100 with vLLM bench latency,
   PyTorch Kineto profiler, and Nsight Systems. Input length is ${INPUT_LEN} and
-  output length is ${OUTPUT_LEN}; seq_len records input plus output tokens for
-  MFU accounting. DeepSeek-MoE max_position_embeddings is 4096, so this uses
+  output length is ${OUTPUT_LEN}; seq_len records input tokens for current
+  MFU/prefill accounting. DeepSeek-MoE max_position_embeddings is 4096, so this uses
   input3968 + output128 rather than input4096 + output128.
 
 hf_url: https://huggingface.co/deepseek-ai/deepseek-moe-16b-base
@@ -67,7 +67,7 @@ workload:
     batch_size_scope: global
     input_len: ${INPUT_LEN}
     output_len: ${OUTPUT_LEN}
-    seq_len: ${SEQ_LEN} # input_len + output_len
+    seq_len: ${SEQ_LEN} # input_len for MFU/prefill FLOP accounting
     dataset: random_${INPUT_LEN}_input_${OUTPUT_LEN}_output
   hardware:
     network_topo:
